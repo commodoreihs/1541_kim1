@@ -186,8 +186,7 @@ VIA1_IFR = $180D        ; VIA1 Interrupt Flag Register
 ; =============================================================================
 ; CONSTANTS - from lccvar.src
 ; =============================================================================
-; CHANGE: ovrbuf moved from $0100 to $0200 to prevent stack corruption
-ovrbuf   = $0200        ;  CHANGED: was $0100 (stack area)
+ovrbuf   = $0100        ;  top of stack
 numjob   = 6            ;  number of jobs
 jmpc     = $50          ;  jump command
 bumpc    = $40          ;  bump command
@@ -294,8 +293,9 @@ RESET:
     ; Disable interrupts during initialization
     sei                   ; 78
  
-    ; Initialize stack pointer
-    ldx  #$FF             ; A2 FF
+    ; Initialize stack pointer (like Commodore's DOS 2.6)
+    ; Stack starts at $0145, above ovrbuf ($0100-$0144)
+    ldx  #$45             ; A2 45
     txs                   ; 9A
     
     ; Initialize VIA1 for FranKIMstein serial I/O (bit-banged RS-232)
