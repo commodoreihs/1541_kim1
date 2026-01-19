@@ -887,7 +887,7 @@ fmt_error:
     
 fmt_done:
     jsr  CRLF
-    jmp  CLEAR
+    jmp  SHOW
 
 ; =============================================================================
 ; IRQ HANDLER - from irq.src
@@ -4331,7 +4331,7 @@ savfull:
 
 savedone:
     jsr  CRLF
-    jmp  CLEAR
+    jmp  SHOW
 
 ; =============================================================================
 ; Simple job wait (no error recovery)
@@ -4948,7 +4948,7 @@ loaderr:
 
 loaddone:
     jsr  CRLF
-    jmp  CLEAR
+    jmp  SHOW
 
 ; =============================================================================
 ; ROM TABLES - from romtblsf.src
