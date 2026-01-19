@@ -170,10 +170,12 @@ dskid    = $5d          ; 2 bytes - disk id
 CNTL30   = $F4          ; Baud rate timing low
 CNTH30   = $F5          ; Baud rate timing high
 TIMH     = $F6          ; Timer high byte
+basic_mode = $F7        ; BASIC mode flag: $FF = return via RTS, $00 = return to monitor
 INL      = $F8          ; Input buffer low
 INH      = $F9          ; Input buffer high
 POINTL   = $FA          ; Address pointer low
 POINTH   = $FB          ; Address pointer high
+disk_err = $FC          ; Disk error code for BASIC
 TMPX     = $FD          ; Saved X register
 CHAR     = $FE          ; Character buffer
 
@@ -774,6 +776,10 @@ TOP:
 ; FORMAT COMMAND - I key from monitor
 ; =============================================================================
 CMD_FORMAT:
+    ; Clear BASIC mode flag (return to monitor, not RTS)
+    lda  #$00
+    sta  basic_mode
+    
     ; Prompt for disk name
     jsr  CRLF
     lda  #'N'
@@ -844,7 +850,8 @@ fmt_id_prompt:
     ; CHANGE: Enable disk controller IRQ now that user input is done
     lda  #$C0              ; bit 7=1 (enable mode), bit 6 (timer 1)
     sta  ier2
-    
+
+format_do_format:
     ; Init format variables
     lda  #$FF
     sta  ftnum             ; trigger bump on first formt call
@@ -875,6 +882,7 @@ fmt_wait:
     jsr  OUTCH
     lda  #'K'
     jsr  OUTCH
+    lda  #0               ; success code
     jmp  fmt_done
     
 fmt_error:
@@ -884,10 +892,13 @@ fmt_error:
     jsr  OUTCH
     lda  #'R'
     jsr  OUTCH
+    lda  #1               ; error code
     
 fmt_done:
+    pha                   ; save error code
     jsr  CRLF
-    jmp  SHOW
+    pla                   ; restore error code
+    jmp  disk_return
 
 ; =============================================================================
 ; IRQ HANDLER - from irq.src
@@ -3898,6 +3909,10 @@ conhdr:
 ; SAVE COMMAND - Save memory to disk
 ; =============================================================================
 CMD_SAVE:
+    ; Clear BASIC mode flag (return to monitor, not RTS)
+    lda  #$00
+    sta  basic_mode
+    
     jsr  CRLF
     ; Prompt for filename
     lda  #'F'
@@ -3995,6 +4010,7 @@ save_get_ea:
     lda  #$C0              ; bit 7=1 (enable mode), bit 6 (timer 1)
     sta  ier2
 
+save_do_save:
 ; =============================================================================
 ; SAVE COMMAND - main logic
 ; Uses original 1541 DOS 2.6 routines where possible
@@ -4310,6 +4326,7 @@ cpbam2:
     jsr  OUTCH
     lda  #'K'
     jsr  OUTCH
+    lda  #0               ; success code
     jmp  savedone
 
 saverr:
@@ -4317,6 +4334,7 @@ saverr:
     jsr  OUTCH
     lda  #'R'
     jsr  OUTCH
+    lda  #1               ; error code
     jmp  savedone
 
 savfull:
@@ -4328,10 +4346,13 @@ savfull:
     jsr  OUTCH
     lda  #'L'
     jsr  OUTCH
+    lda  #2               ; directory full error code
 
 savedone:
+    pha                   ; save error code
     jsr  CRLF
-    jmp  SHOW
+    pla                   ; restore error code
+    jmp  disk_return
 
 ; =============================================================================
 ; Simple job wait (no error recovery)
@@ -4599,6 +4620,10 @@ gha_loop:
 ; - Reads file data using job queue, stores to memory at load address
 ; =============================================================================
 CMD_LOAD:
+    ; Clear BASIC mode flag (return to monitor, not RTS)
+    lda  #$00
+    sta  basic_mode
+    
     jsr  CRLF
     ; GLUE CODE: Prompt for filename (KIM-1 style, not original DOS)
     lda  #'F'
@@ -4652,6 +4677,8 @@ load_start:
     sta  cdrive
     sta  drive
     sta  jobnum           ; use job 0
+
+load_do_load:
     jsr  turnon           ; original DOS from lcc
 
     ; Pattern from itrial/initdr in tst2.src:
@@ -4937,6 +4964,7 @@ load_done_ok:
     jsr  OUTCH
     lda  #'K'
     jsr  OUTCH
+    lda  #0               ; success code
     jmp  loaddone
 
 loaderr:
@@ -4945,10 +4973,13 @@ loaderr:
     jsr  OUTCH
     lda  #'R'
     jsr  OUTCH
+    lda  #1               ; error code
 
 loaddone:
+    pha                   ; save error code
     jsr  CRLF
-    jmp  SHOW
+    pla                   ; restore error code
+    jmp  disk_return
 
 ; =============================================================================
 ; ROM TABLES - from romtblsf.src
@@ -4966,6 +4997,96 @@ nzones:
 maxtrk:         ; maximum track # +1
 trknum:         ; zone boundaries track numbers
         .byte    36,31,25,18
+
+; =============================================================================
+; BASIC ENTRY POINTS - For BASIC at $C000 to call
+; These bypass user prompts - caller must set up parameters first
+; =============================================================================
+
+; -----------------------------------------------------------------------------
+; BSAVE - Save memory to disk (non-interactive)
+; Input: savename ($9A-$A9) = filename padded with $A0
+;        sal ($AA) / sah ($AB) = start address
+;        eal ($AC) / eah ($AD) = end address
+; Output: Returns via RTS, A=0 success, A=non-zero error
+; -----------------------------------------------------------------------------
+BSAVE:
+    ; Set BASIC mode flag (return via RTS, not to monitor)
+    lda  #$FF
+    sta  basic_mode
+    
+    ; Set up source pointer from sal/sah
+    lda  sal
+    sta  POINTL
+    lda  sah
+    sta  POINTH
+    
+    ; Enable disk controller IRQ
+    lda  #$C0
+    sta  ier2
+    
+    ; Jump into save logic (after prompts)
+    jmp  save_do_save
+
+; -----------------------------------------------------------------------------
+; BLOAD - Load file from disk (non-interactive)
+; Input: savename ($9A-$A9) = filename padded with $A0
+; Output: Returns via RTS, A=0 success, A=non-zero error
+;         sal/sah and eal/eah set to loaded range
+; -----------------------------------------------------------------------------
+BLOAD:
+    ; Set BASIC mode flag (return via RTS, not to monitor)
+    lda  #$FF
+    sta  basic_mode
+    
+    ; Enable disk controller IRQ
+    lda  #$C0
+    sta  ier2
+    
+    ; Initialize drive variables
+    lda  #0
+    sta  drvnum
+    sta  cdrive
+    sta  drive
+    sta  jobnum
+    
+    ; Jump into load logic (after prompts)
+    jmp  load_do_load
+
+; -----------------------------------------------------------------------------
+; BFORMAT - Format disk (non-interactive)
+; Input: dskname ($8A-$99) = disk name padded with $A0
+;        dskid ($5D-$5E) = 2-byte disk ID
+; Output: Returns via RTS, A=0 success, A=non-zero error
+; -----------------------------------------------------------------------------
+BFORMAT:
+    ; Set BASIC mode flag (return via RTS, not to monitor)
+    lda  #$FF
+    sta  basic_mode
+    
+    ; Enable disk controller IRQ
+    lda  #$C0
+    sta  ier2
+    
+    ; Jump into format logic (after prompts)
+    jmp  format_do_format
+
+; -----------------------------------------------------------------------------
+; disk_return - Common return routine for disk operations
+; If basic_mode is set, returns via RTS with status in A
+; If basic_mode is clear, returns to monitor via SHOW
+; Input: A = error code (0 = success)
+; -----------------------------------------------------------------------------
+disk_return:
+    sta  disk_err         ; save error code
+    bit  basic_mode       ; check if BASIC mode
+    bpl  disk_ret_mon     ; branch if basic_mode = $00
+    ; BASIC mode - return via RTS
+    lda  disk_err
+    rts
+disk_ret_mon:
+    ; Monitor mode - return to SHOW
+    jmp  SHOW
 
 ; =============================================================================
 ; VECTORS
