@@ -165,9 +165,11 @@ header   = $58          ; 5 bytes for decoded header
 dskid    = $5d          ; 2 bytes - disk id
 
 ; KIM-1 monitor variables (from v5)
-CNTL30   = $5f          ; Baud rate timing low
-CNTH30   = $60          ; Baud rate timing high
-TIMH     = $61          ; Timer high byte
+; CHANGE: Moved CNTL30/CNTH30/TIMH to high zero page to avoid corruption
+; by disk controller code. They were at $5F-$61, adjacent to dskid ($5D-$5E)
+CNTL30   = $F4          ; Baud rate timing low
+CNTH30   = $F5          ; Baud rate timing high
+TIMH     = $F6          ; Timer high byte
 INL      = $F8          ; Input buffer low
 INH      = $F9          ; Input buffer high
 POINTL   = $FA          ; Address pointer low
@@ -369,13 +371,13 @@ clrjob:
     sta  t1hl2
     sta  t1hc2
     
-    ; Enable timer IRQ
+    ; CHANGE: Do NOT enable timer IRQ at startup
+    ; Disk controller IRQ is only enabled during I, L, S commands
+    ; This prevents IRQ interference with serial I/O and user code
     lda  #$7F
-    sta  ier2              ; disable all first
-    lda  #$C0
-    sta  ier2              ; enable timer
+    sta  ier2              ; disable all interrupts
     
-    cli                   ; enable interrupts
+    cli                   ; enable interrupts (but no sources active)
     jmp  START            ; go to KIM monitor
 
 ; =============================================================================
@@ -391,6 +393,20 @@ START:
 ; CLEAR - Clear input buffer (KIM-1 line 156)
 ; =============================================================================
 CLEAR:
+    ; CHANGE: Turn off drive motor and LED before disabling IRQ
+    ; Since we're disabling the disk controller IRQ, it won't do this for us
+    lda  dskcnt
+    and  #$ff-$04          ; clear bit 2 = motor off
+    and  #$ff-$08          ; clear bit 3 = LED off
+    sta  dskcnt
+    lda  #0
+    sta  drvst             ; clear drive status
+    
+    ; CHANGE: Disable disk controller IRQ when returning to monitor
+    ; This ensures IRQs don't interfere with serial I/O or user code
+    lda  #$7F
+    sta  ier2              ; disable all VIA2 interrupts
+    
     lda  #$00
     sta  INL
     sta  INH
@@ -485,7 +501,6 @@ MODIFY:
 ; GOEXEC - Execute program (KIM-1 line 237)
 ; =============================================================================
 GOEXEC:
-    jsr  OPEN
     jmp  (POINTL)
 
 ; =============================================================================
@@ -825,6 +840,10 @@ fmt_id_prompt:
     lda  #'T'
     jsr  OUTCH
     jsr  CRLF
+    
+    ; CHANGE: Enable disk controller IRQ now that user input is done
+    lda  #$C0              ; bit 7=1 (enable mode), bit 6 (timer 1)
+    sta  ier2
     
     ; Init format variables
     lda  #$FF
@@ -3972,6 +3991,10 @@ save_get_ea:
     lda  sah
     sta  POINTH
 
+    ; CHANGE: Enable disk controller IRQ now that user input is done
+    lda  #$C0              ; bit 7=1 (enable mode), bit 6 (timer 1)
+    sta  ier2
+
 ; =============================================================================
 ; SAVE COMMAND - main logic
 ; Uses original 1541 DOS 2.6 routines where possible
@@ -4618,6 +4641,10 @@ load_name_pad:
 
 load_start:
     jsr  CRLF
+
+    ; CHANGE: Enable disk controller IRQ now that user input is done
+    lda  #$C0              ; bit 7=1 (enable mode), bit 6 (timer 1)
+    sta  ier2
 
     ; GLUE CODE: Initialize drive variables
     lda  #0
