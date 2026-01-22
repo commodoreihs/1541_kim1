@@ -621,6 +621,7 @@ GETCH2:
 OUTSP:
     lda  #$20
 OUTCH:
+    pha                   ; CHANGE: preserve .A (makes implementing BASIC easier)
     php                   ; save I flag
     sei                   ; protect timing
     sta  CHAR
@@ -655,6 +656,7 @@ OUTCH2:
     jsr  DELAY
     ldx  TMPX
     plp                   ; restore I flag
+    pla                   ; CHANGE: restore .A
     rts
 
 ; =============================================================================
