@@ -622,6 +622,7 @@ OUTSP:
     lda  #$20
 OUTCH:
     pha                   ; CHANGE: preserve .A (makes implementing BASIC easier)
+    sty TMPY              ; CHANGE: preserve .Y for the same reason.
     php                   ; save I flag
     sei                   ; protect timing
     sta  CHAR
@@ -655,6 +656,7 @@ OUTCH2:
     sta  VIA1_PB
     jsr  DELAY
     ldx  TMPX
+    ldy  TMPY             ; CHANGE: restore .Y
     plp                   ; restore I flag
     pla                   ; CHANGE: restore .A
     rts
