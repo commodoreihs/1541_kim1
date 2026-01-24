@@ -177,6 +177,7 @@ POINTL   = $FA          ; Address pointer low
 POINTH   = $FB          ; Address pointer high
 disk_err = $FC          ; Disk error code for BASIC
 TMPX     = $FD          ; Saved X register
+TMPY     = $FF          ; Saved Y register
 CHAR     = $FE          ; Character buffer
 
 ; Additional VIA1 definitions for serial I/O
@@ -188,7 +189,8 @@ VIA1_IFR = $180D        ; VIA1 Interrupt Flag Register
 ; =============================================================================
 ; CONSTANTS - from lccvar.src
 ; =============================================================================
-ovrbuf   = $0100        ;  top of stack
+ovrbuf   = $0200        ;  CHANGE: Commodore DOS 2.6 used $0100, but deeper
+                        ;  call stack in FranKIMstein was corrupting the stack.
 numjob   = 6            ;  number of jobs
 jmpc     = $50          ;  jump command
 bumpc    = $40          ;  bump command
@@ -197,7 +199,7 @@ fmtcmd   = $f0          ;  ADDED: format command code
 jread    = $80          ;  read command (from equatesf.src)
 jwrite   = $90          ;  write command (from equatesf.src)
 jseek    = $B0          ;  seek command (from equatesf.src)
-bufs     = $0400        ;  start of buffers
+bufs     = $0300        ;  start of buffers
 buff0    = bufs
 buff1    = bufs+$100
 buff2    = bufs+$200
@@ -295,9 +297,10 @@ RESET:
     ; Disable interrupts during initialization
     sei                   ; 78
  
-    ; Initialize stack pointer (like Commodore's DOS 2.6)
-    ; Stack starts at $0145, above ovrbuf ($0100-$0144)
-    ldx  #$45             ; A2 45
+    ; Initialize stack pointer
+    ; CHANGE: Commodore DOS 2.6 stack starts at $0145, above ovrbuf ($0100-$0144).
+    ;         Since we moved ovrbuf to $0200 was can use the full stack
+    ldx  #$FF             ; A2 FF
     txs                   ; 9A
     
     ; Initialize VIA1 for FranKIMstein serial I/O (bit-banged RS-232)
