@@ -162,7 +162,7 @@ lwpt     = $0a          ; last write protect state (was $55)
 wpsw     = $0b          ; write protect switch (was $56)
 phase    = $0c          ; phase offset (was $57)
 header   = $0d          ; 5 bytes for decoded header (was $58, now $0D-$11)
-dskid    = $5f          ; 2 bytes - disk id (was $5D, now $5F-$60)
+dskid    = $60          ; 2 bytes - disk id (was $5D, now $60-$61)
 
 ; KIM-1 monitor variables (from v5)
 ; CHANGE: Moved CNTL30/CNTH30/TIMH to high zero page to avoid corruption
@@ -4065,6 +4065,23 @@ save_do_save:
     lda  #10
     sta  secinc           ; sector interleave
     jsr  turnon           ; turn on motor
+
+    ; CHANGE: Initialize disk ID before any reads
+    ; SEEK to track 18 to read header and get disk ID
+    lda  dirtrk
+    sta  track
+    sta  hdrs
+    lda  #0
+    sta  sector
+    sta  hdrs+1
+    lda  #jseek           ; SEEK job - reads header without ID verification
+    sta  jobs
+    jsr  simpwait
+    ; Copy disk ID from header to dskid
+    lda  header
+    sta  dskid
+    lda  header+1
+    sta  dskid+1
 
     ; Read BAM from track 18 sector 0 using job 0
     lda  dirtrk
