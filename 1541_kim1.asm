@@ -95,13 +95,14 @@ ledprt   = $1c00        ;  on pb of $1c00
 
 ; =============================================================================
 ; ZERO PAGE VARIABLES - from lccvar.src
-; CHANGE: Reorganized to avoid conflict with KIM-1 monitor
+; CHANGE: Reorganized to avoid conflict with KIM-1 monitor and BASIC
 ; =============================================================================
 
 ; Job queue and headers
 ; CHANGE: Moved to start of zero page for KIM-1 compatibility
-jobs     = $00          ; 6 job slots
-hdrs     = $06          ; 12 bytes - header table (track/sector pairs)
+; CHANGE: Reduced to single job slot since FranKIMstein never queues multiple jobs
+jobs     = $00          ; 1 job slot (was 6)
+hdrs     = $06          ; 2 bytes - single header (track/sector pair)
 
 ; Drive state - CHANGE: single byte not array (single drive)
 drvst    = $12          ; drive status
@@ -149,20 +150,19 @@ ftnum    = $41          ;  current format track
 btab     = $42          ; 4 bytes
 gtab     = $46          ; 8 bytes
 ;
-as       = $4e          ;  # of steps to acel
-af       = $4f          ;  acel. factor
-aclstp   = $50          ;  steps to go
-rsteps   = $51          ;  # of run steps
-nxtst    = $52          ; 2 bytes - next stepper state
-minstp   = $54          ;  min reqired to acel
-;
-lwpt     = $55          ; last write protect state
-wpsw     = $56          ; write protect switch
-phase    = $57          ; phase offset
-;
-header   = $58          ; 5 bytes for decoded header
-;
-dskid    = $5d          ; 2 bytes - disk id
+; CHANGE: Relocated stepper/header/dskid variables to avoid CHRGET conflict ($48-$5F)
+; These were at $4E-$5E, now moved to freed job queue space
+as       = $01          ;  # of steps to acel (was $4E)
+af       = $02          ;  acel. factor (was $4F)
+aclstp   = $03          ;  steps to go (was $50)
+rsteps   = $04          ;  # of run steps (was $51)
+minstp   = $05          ;  min reqired to acel (was $54)
+nxtst    = $08          ; 2 bytes - next stepper state (was $52)
+lwpt     = $0a          ; last write protect state (was $55)
+wpsw     = $0b          ; write protect switch (was $56)
+phase    = $0c          ; phase offset (was $57)
+header   = $0d          ; 5 bytes for decoded header (was $58, now $0D-$11)
+dskid    = $5f          ; 2 bytes - disk id (was $5D, now $5F-$60)
 
 ; KIM-1 monitor variables (from v5)
 ; CHANGE: Moved CNTL30/CNTH30/TIMH to high zero page to avoid corruption
@@ -191,7 +191,8 @@ VIA1_IFR = $180D        ; VIA1 Interrupt Flag Register
 ; =============================================================================
 ovrbuf   = $0200        ;  CHANGE: Commodore DOS 2.6 used $0100, but deeper
                         ;  call stack in FranKIMstein was corrupting the stack.
-numjob   = 6            ;  number of jobs
+; CHANGE: Single job slot
+numjob   = 1            ;  number of jobs (was 6)
 jmpc     = $50          ;  jump command
 bumpc    = $40          ;  bump command
 execd    = $60          ;  execute command
@@ -342,13 +343,9 @@ RESET:
     sta  lwpt
     sta  wpsw
     
-    ; Clear job queue
-    ldx  #numjob-1
+    ; Clear job queue (single slot now)
     lda  #0
-clrjob:
-    sta  jobs,x
-    dex
-    bpl  clrjob
+    sta  jobs
     
     ; Init stepper state
     lda  #<inact
@@ -1025,11 +1022,11 @@ lcc:
     sta  pcr2
 
 lcc_top:
-    ldy  #numjob-1        ;  pointer into job que
+    ; CHANGE: Single job slot - no loop needed
+    ldy  #0               ;  job 0 only
 
-cont10:
-    lda  jobs,y           ;  find a job (msb set)
-    bpl  cont20           ;  not one here
+    lda  jobs             ;  check job (msb set = job pending)
+    bpl  end_jmp          ;  no job pending
 
     cmp  #jmpc            ;  test if its a jump command
     bne  cont30
@@ -1050,8 +1047,15 @@ cont35:
     sta  drive
 
     cmp  cdrive           ;  test if current drive
-    beq  cont40
+    bne  cont37           ;  different drive, need turnon
 
+    ; CHANGE: Even if same drive, check if motor is actually on
+    ; After LOAD timeout, cdrive still = 0 but motor is off (drvst = 0)
+    lda  drvst
+    bne  cont40           ;  motor is on (accelerating, running, or stepping)
+    
+    ; Motor is off, need to turn it on
+cont37:
     jsr  turnon           ;  turn on drive
     lda  drive
     sta  cdrive
@@ -1067,17 +1071,16 @@ cont40:
 cont50:
     jmp  end
 
-cont20:
-    dey
-    bpl  cont10
-
+; CHANGE: Removed cont20 loop - single job slot now
+end_jmp:
     jmp  end
 
 que:
     lda  #$20             ;  status=running
     sta  drvst
 
-    ldy  #numjob-1
+    ; CHANGE: Single job slot - always job 0
+    ldy  #0
     sty  jobn
 
 que10:
@@ -1201,21 +1204,19 @@ bmp:
 setjb:
     ldy  jobn
 setjb1:
-    lda  jobs,y
+    lda  jobs             ; CHANGE: Single job slot, no indexing needed
     pha
     bpl  setj10           ;  no job here
 
     and  #$78
     sta  job
-    tya
-    asl  a
-    adc  #<hdrs
+    ; CHANGE: hdrpnt always points to hdrs (single job)
+    lda  #<hdrs
     sta  hdrpnt
-    lda  #0               ; CHANGE: original relied on zero page being cleared at init
+    lda  #0
     sta  hdrpnt+1         ; hdrs is in zero page so high byte must be 0
-    tya                   ;  point at buffer
-    clc
-    adc  #>bufs
+    ; CHANGE: bufpnt always points to buff0 (single job)
+    lda  #>bufs
     sta  bufpnt+1
 
 setj10:
@@ -1455,8 +1456,8 @@ end33:
 ;  * utility routines
 ;
 errr:
-    ldy  jobn             ;  return  job code
-    sta  jobs,y
+    ; CHANGE: Single job slot, store result directly
+    sta  jobs
 
     lda  gcrflg           ;  test if buffer left gcr
     beq  errr10           ;  no
@@ -3426,10 +3427,10 @@ wrt40:
 
     jsr  wtobin           ;  convert write image to binary
 
-    ldy  jobn             ;  make job a verify
-    lda  jobs,y
+    ; CHANGE: Single job slot, modify directly
+    lda  jobs
     eor  #$30
-    sta  jobs,y
+    sta  jobs
 
     jmp  seak             ;  scan job que
 
@@ -5063,7 +5064,7 @@ BLOAD:
 ; -----------------------------------------------------------------------------
 ; BFORMAT - Format disk (non-interactive)
 ; Input: dskname ($8A-$99) = disk name padded with $A0
-;        dskid ($5D-$5E) = 2-byte disk ID
+;        dskid ($60-$61) = 2-byte disk ID
 ; Output: Returns via RTS, A=0 success, A=non-zero error
 ; -----------------------------------------------------------------------------
 BFORMAT:
