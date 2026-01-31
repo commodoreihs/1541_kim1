@@ -5106,7 +5106,30 @@ disk_return:
     sta  disk_err         ; save error code
     bit  basic_mode       ; check if BASIC mode
     bpl  disk_ret_mon     ; branch if basic_mode = $00
-    ; BASIC mode - return via RTS
+    ;  BASIC mode - turn off motor and LED, disable IRQ, return via RTS
+    lda  dskcnt
+    and  #$ff-$04-$08     ; clear bit 2 (motor) and bit 3 (LED)
+    sta  dskcnt
+    lda  #0
+    sta  drvst            ; clear drive status
+    lda  #$7F
+    sta  ier2             ; disable all VIA2 interrupts
+    lda  t1lc2            ; read timer to clear any pending interrupt
+    ; Disk operations corrupt BASIC CHRGET in ZP. Rather than try to find a place
+    ; to move CHRGET, just restore the CHRGET bytes corrupted by gtab overlap
+    ; ($48-$4D)
+    lda  #$E6
+    sta  $48
+    lda  #$4F 
+    sta  $49
+    lda  #$D0
+    sta  $4A
+    lda  #$02
+    sta  $4B
+    lda  #$E6
+    sta  $4C
+    lda  #$50
+    sta  $4D
     lda  disk_err
     rts
 disk_ret_mon:
