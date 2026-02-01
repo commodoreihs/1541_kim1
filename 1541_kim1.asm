@@ -4870,13 +4870,21 @@ load_found:
     beq  load_first_ok
     jmp  loaderr
 load_first_ok:
-    ; GLUE CODE: Get load address from bytes 2-3 of first sector
-    ; Store in sal/sah and POINTL/POINTH for destination pointer
+    ; GLUE CODE: Get load address.
+    ; When running in BASIC mode, sal/sah are already set by CLOAD
+    ; (loads to TXTTAB). In monitor mode, use the first two bytes
+    ; of file data for the start address.
+    bit  basic_mode
+    bmi  load_use_sal
+    ; monitor mode
     lda  buff0+2          ; low byte of load address
     sta  sal
-    sta  POINTL
     lda  buff0+3          ; high byte of load address
     sta  sah
+load_use_sal:
+    lda  sal
+    sta  POINTL
+    lda  sah
     sta  POINTH
 
     ; GLUE CODE: Print load address
@@ -4970,7 +4978,11 @@ load_next_ok:
     jmp  load_data_loop
 
 load_done_ok:
-    ; GLUE CODE: Print end address
+    ; Store end address in eal/eah for BASIC
+    lda  POINTL
+    sta  eal
+    LDA  POINTH
+    sta  eah
     jsr  CRLF
     lda  #'E'
     jsr  OUTCH
